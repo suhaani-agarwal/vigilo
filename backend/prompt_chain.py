@@ -178,7 +178,7 @@ def manual_relevance_selection(amendments: List[Dict], top_n: int, source: str, 
 # Model configuration (per-stage)
 # Note: These identifiers are user-specified. Availability depends on the provider configured via Groq client.
 # We'll pass them through to call_groq; if unavailable, the fallback logic remains active when client is None.
-MODEL_ANALYSIS_A = "gemma2-9b-it"          # Stage 1A (amendment analysis agent A)
+MODEL_ANALYSIS_A = "gemini-2.5-flash-lite"          # Stage 1A (amendment analysis agent A)
 MODEL_ANALYSIS_B = "openai/gpt-oss-20b"           # Stage 1B (amendment analysis agent B)
 MODEL_DETAILS = "openai/gpt-oss-120b"        # Stage 2 (relevance & detailed profile match)
 MODEL_COMPLIANCE = "openai/gpt-oss-20b"      # Stage 3/4 (evidence-rich compliance checks)

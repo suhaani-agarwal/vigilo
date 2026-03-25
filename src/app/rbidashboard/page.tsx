@@ -48,7 +48,7 @@ type MetaItem = {
 };
 
 export default function FinanceDashboardPage() {
-  const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+  const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5005';
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -233,13 +233,13 @@ useEffect(() => {
   const loadAmendments = async () => {
     const loadingMessages = [
       "Initializing compliance dashboard...",
-      "Fetching your company profile...",
-      "Analyzing your product portfolio...", 
-      "Scanning latest FSSAI amendments...",
-      "Scanning DGFT trade notifications...", // Added DGFT specific message
+      "Checking for regulatory updates...",
+      "Scanning FSSAI notifications...",
+      "Scanning DGFT trade notifications...",
       "Scanning GST tax regulations...",
+      "Analyzing your company profile...",
       "Cross-referencing regulations with your docs...",
-      "Evaluating production legalities...",
+      "Filtering relevant amendments...",
       "Loading personalized compliance data..."
     ];
 
@@ -249,16 +249,26 @@ useEffect(() => {
       await new Promise(resolve => setTimeout(resolve, i === 0 ? 2500 : 1500));
     }
 
-      try {
-      // Fetch curated latest relevant amendments (5 FSSAI, 3 DGFT, 3 GST) — include company_id if available
+    try {
+      // First, trigger scraping for all sources to ensure we have the latest data
+      const scrapePromises = [
+        fetch(`${API_BASE}/update`).then(res => res.ok ? res.json() : null),
+        fetch(`${API_BASE}/update-dgft`).then(res => res.ok ? res.json() : null),
+        fetch(`${API_BASE}/update-gst`).then(res => res.ok ? res.json() : null)
+      ];
+
+      // Wait for scraping to complete (or at least start)
+      await Promise.allSettled(scrapePromises);
+      
+      // Now fetch the curated latest relevant amendments (AI-filtered)
       const query = companyId ? `?company_id=${encodeURIComponent(companyId)}` : "";
       const res = await fetch(`${API_BASE}/latest-relevant${query}`);
+      
       let allAmendments: MetaItem[] = [];
       if (res.ok) {
         const payload = await res.json();
         console.debug("/latest-relevant raw response:", payload);
 
-        // Backend returns an object {FSSAI: [...], DGFT: [...], GST: [...]}.
         if (Array.isArray(payload)) {
           allAmendments = payload;
         } else if (payload && typeof payload === 'object') {
@@ -267,7 +277,6 @@ useEffect(() => {
           for (const key of ['FSSAI', 'DGFT', 'GST']) {
             const list = payload[key];
             if (Array.isArray(list)) {
-              // Ensure each item has a source
               list.forEach((it: any) => {
                 try { if (!it.source) it.source = key; } catch(e) {}
                 merged.push(it as MetaItem);
@@ -275,21 +284,10 @@ useEffect(() => {
             }
           }
           allAmendments = merged;
-        } else {
-          console.warn('Unexpected /latest-relevant response shape', payload);
         }
-      } else {
-        console.warn('/latest-relevant returned non-OK', res.status);
       }
 
-      // `allAmendments` is populated from the curated `/latest-relevant` endpoint
-      // Guard: make sure it's an array before calling sort
-      if (!Array.isArray(allAmendments)) {
-        console.error('allAmendments is not an array', allAmendments);
-        allAmendments = [];
-      }
-
-      // Sort by date (most recent first) - handle "Unknown" dates and missing date fields
+      // Sort by date (most recent first)
       allAmendments.sort((a, b) => {
         const dateA = (!a || !a.date || a.date === 'Unknown') ? new Date(0) : new Date(a.date);
         const dateB = (!b || !b.date || b.date === 'Unknown') ? new Date(0) : new Date(b.date);
@@ -297,6 +295,7 @@ useEffect(() => {
       });
 
       setAmendments(allAmendments.slice(0, 35));
+      
       setTimeout(() => {
         setNotifications(prev => [
           ...prev,
@@ -310,15 +309,27 @@ useEffect(() => {
       
     } catch (err) {
       console.error("Failed to load amendments:", err);
+      // Fallback: try to load without scraping if scraping failed
+      try {
+        const query = companyId ? `?company_id=${encodeURIComponent(companyId)}` : "";
+        const res = await fetch(`${API_BASE}/latest-relevant${query}`);
+        if (res.ok) {
+          const payload = await res.json();
+          if (Array.isArray(payload)) {
+            setAmendments(payload.slice(0, 35));
+          }
+        }
+      } catch (fallbackErr) {
+        console.error("Fallback loading also failed:", fallbackErr);
+      }
     }
     
     setPageLoading(false);
     setIntroLoading(false);
-
-
   };
+  
   loadAmendments();
-}, [API_BASE]);
+}, [API_BASE, companyId]);
 
 
   const filteredAmendments = useMemo(() => {
