@@ -224,12 +224,12 @@ def latest_relevant(company_id: Optional[str] = None):
         print(f"/latest-relevant: company_id={company_id} fssai_candidates={len(fssai_sorted)} dgft_candidates={len(dgft_sorted)} gst_candidates={len(gst_sorted)}")
         
         # Select amendments with different models
-        selected_fssai = select_relevant_amendments(fssai_sorted, top_n=5, source="FSSAI", 
-                                                   company=company_profile, model="openai/gpt-oss-20b")
+        selected_fssai = select_relevant_amendments(fssai_sorted, top_n=5, source="FSSAI",
+                                                   company=company_profile, model="llama-3.3-70b-versatile")
         selected_dgft = select_relevant_amendments(dgft_sorted, top_n=5, source="DGFT", 
-                                                  company=company_profile, model="gemma2-9b-it")
+                                                  company=company_profile, model="gemini-2.5-flash-lite")
         selected_gst = select_relevant_amendments(gst_sorted, top_n=5, source="GST", 
-                                                 company=company_profile, model="gemma2-9b-it")
+                                                 company=company_profile, model="gemini-2.5-flash-lite")
 
         print(f"/latest-relevant: selected fssai={len(selected_fssai)} dgft={len(selected_dgft)} gst={len(selected_gst)}")
         

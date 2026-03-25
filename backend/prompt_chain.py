@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 from groq import Groq
+import requests
 from typing import List, Dict, Optional, Tuple
 import json
 import re
@@ -30,6 +31,23 @@ load_dotenv(dotenv_path=project_root_env)
 load_dotenv(dotenv_path=os.path.join(backend_dir, ".env.local"))
 API_KEY = os.getenv("GROQ_API_KEY")
 client = Groq(api_key=API_KEY) if API_KEY else None
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+_GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+def _call_gemini(prompt: str, model: str = "gemini-2.5-flash-lite", temperature: float = 0.1) -> str:
+    """Call the Gemini REST API directly."""
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY not set in environment")
+    url = f"{_GEMINI_BASE}/{model}:generateContent?key={GEMINI_API_KEY}"
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": temperature, "responseMimeType": "application/json"},
+    }
+    resp = requests.post(url, json=payload, timeout=90)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["candidates"][0]["content"]["parts"][0]["text"]
 
 def select_relevant_amendments(amendments: List[Dict], top_n: int = 3, source: str = "", 
                               company: Optional[Dict] = None, model: str = "openai/gpt-oss-20b") -> List[Dict]:
@@ -91,14 +109,18 @@ def select_relevant_amendments(amendments: List[Dict], top_n: int = 3, source: s
                     f"\n\nReturn exactly {top_n} indices as JSON array."
                 )
             
-            print(f"Calling Groq for source={source} with model={model}")
-            resp = client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}], 
-                model=model, 
-                temperature=0.1,  # Slight temperature for variety
-                max_tokens=50
-            )
-            text = resp.choices[0].message.content.strip()
+            if model.startswith("gemini"):
+                print(f"Calling Gemini API for source={source} with model={model}")
+                text = _call_gemini(prompt, model=model, temperature=0.1)
+            else:
+                print(f"Calling Groq for source={source} with model={model}")
+                resp = client.chat.completions.create(
+                    messages=[{"role": "user", "content": prompt}],
+                    model=model,
+                    temperature=0.1,
+                    max_tokens=50
+                )
+                text = resp.choices[0].message.content.strip()
             print(f"Raw response: {text}")
             
             import re, json as _json
@@ -118,7 +140,7 @@ def select_relevant_amendments(amendments: List[Dict], top_n: int = 3, source: s
             print(f"AI selection failed for {source}, using fallback")
             
         except Exception as e:
-            print(f"Groq selection failed for source {source}: {e}")
+            print(f"AI selection failed for source {source}: {e}")
 
     # Fallback: return top N by date with relevance scoring
     return manual_relevance_selection(amendments, top_n, source, company)
@@ -176,13 +198,12 @@ def manual_relevance_selection(amendments: List[Dict], top_n: int, source: str, 
     return [amendment for score, amendment in scored_amendments[:top_n]]
 
 # Model configuration (per-stage)
-# Note: These identifiers are user-specified. Availability depends on the provider configured via Groq client.
-# We'll pass them through to call_groq; if unavailable, the fallback logic remains active when client is None.
-MODEL_ANALYSIS_A = "gemini-2.5-flash-lite"          # Stage 1A (amendment analysis agent A)
-MODEL_ANALYSIS_B = "openai/gpt-oss-20b"           # Stage 1B (amendment analysis agent B)
-MODEL_DETAILS = "openai/gpt-oss-120b"        # Stage 2 (relevance & detailed profile match)
-MODEL_COMPLIANCE = "openai/gpt-oss-20b"      # Stage 3/4 (evidence-rich compliance checks)
-MODEL_OPTIMIZE = "deepseek-r1-distill-llama-70b"  # Stage 5 (comprehensive aggregation & prioritization)
+# gemini-* models are routed to the Gemini API; others go through Groq.
+MODEL_ANALYSIS_A = "gemini-2.5-flash-lite"          # Stage 1A — Gemini API
+MODEL_ANALYSIS_B = "meta-llama/llama-4-scout-17b-16e-instruct"         # Stage 1B — Groq
+MODEL_DETAILS = "openai/gpt-oss-120b"                # Stage 2 — Groq
+MODEL_COMPLIANCE = "openai/gpt-oss-20b"         # Stage 3/4 — Groq
+MODEL_OPTIMIZE = "llama-3.3-70b-versatile"           # Stage 5 — Groq
 MODEL_DEFAULT = "openai/gpt-oss-120b"
 
 class AmendmentAnalyzer:
@@ -197,8 +218,31 @@ class AmendmentAnalyzer:
         os.makedirs(self.log_dir, exist_ok=True)
     
     @staticmethod
+    def _repair_json(text: str) -> str:
+        """Fix common JSON syntax errors produced by LLMs."""
+        # Python literals → JSON
+        text = re.sub(r'\bTrue\b', 'true', text)
+        text = re.sub(r'\bFalse\b', 'false', text)
+        text = re.sub(r'\bNone\b', 'null', text)
+        # Missing comma between two objects:  }  {  or  }\n{
+        text = re.sub(r'}\s*\n(\s*){', r'},\n\1{', text)
+        text = re.sub(r'}(\s+){', r'}, {', text)
+        # Missing comma between object and a string key: }\n  "key"
+        text = re.sub(r'}\s*\n(\s*)"', r'},\n\1"', text)
+        # Missing comma between two arrays
+        text = re.sub(r']\s*\n(\s*)\[', r'],\n\1[', text)
+        text = re.sub(r'](\s+)\[', r'], [', text)
+        # Missing comma: array/object end followed by string on next line
+        text = re.sub(r']\s*\n(\s*)"', r'],\n\1"', text)
+        # Missing comma between string values:  "val"\n  "val"
+        text = re.sub(r'"\s*\n(\s*)"', r'",\n\1"', text)
+        # Remove trailing commas before } or ]
+        text = re.sub(r',(\s*[}\]])', r'\1', text)
+        return text
+
+    @staticmethod
     def _strip_to_json(text: str) -> str:
-        """Attempt to extract a JSON object/array from a possibly wrapped reply."""
+        """Extract a JSON object/array from a possibly wrapped reply and repair common syntax errors."""
         if text is None:
             return "{}"
         t = text.strip()
@@ -209,8 +253,8 @@ class AmendmentAnalyzer:
         start = min([pos for pos in [t.find('{'), t.find('[')] if pos != -1] or [0])
         end = max(t.rfind('}'), t.rfind(']'))
         if end != -1 and end >= start:
-            return t[start:end+1]
-        return t
+            t = t[start:end+1]
+        return AmendmentAnalyzer._repair_json(t)
         
     def log_stage(self, stage_name: str, message: str):
         """Log stage progress with timestamp"""
@@ -228,28 +272,45 @@ class AmendmentAnalyzer:
             self.log_stage("ERROR", f"Failed writing {filename}: {e}")
 
     def call_groq(self, prompt: str, model: str = MODEL_DEFAULT, temperature: float = 0.2) -> str:
-        """Make API call to Groq with specified model. On failure, retry once with MODEL_DEFAULT."""
+        """Make API call; routes gemini-* models to Gemini API, others to Groq. Retries once with MODEL_DEFAULT on failure."""
+        # Route Gemini models to Gemini API
+        if model.startswith("gemini"):
+            try:
+                return _call_gemini(prompt, model=model, temperature=temperature)
+            except Exception as e:
+                self.log_stage("WARN", f"Gemini model '{model}' failed ({e}); retrying with default '{MODEL_DEFAULT}'")
+                try:
+                    response = client.chat.completions.create(
+                        messages=[{"role": "user", "content": prompt}],
+                        model=MODEL_DEFAULT,
+                        temperature=temperature,
+                        response_format={"type": "json_object"},
+                    )
+                    return response.choices[0].message.content
+                except Exception as e2:
+                    self.log_stage("ERROR", f"Retry with default Groq model failed: {e2}")
+                    raise
+
         try:
             if client is None:
-                # Fallback: return a minimal JSON placeholder so pipeline continues
                 self.log_stage("WARN", "GROQ API key missing — using local fallback response")
-                # Heuristic: return empty amendments array wrapper
                 return json.dumps({"amendments": []})
             response = client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 model=model,
-                temperature=temperature
+                temperature=temperature,
+                response_format={"type": "json_object"},
             )
             return response.choices[0].message.content
         except Exception as e:
-            # Attempt a single retry with default model if a non-default model was requested
             if model != MODEL_DEFAULT and client is not None:
                 self.log_stage("WARN", f"Model '{model}' failed ({e}); retrying with default '{MODEL_DEFAULT}'")
                 try:
                     response = client.chat.completions.create(
                         messages=[{"role": "user", "content": prompt}],
                         model=MODEL_DEFAULT,
-                        temperature=temperature
+                        temperature=temperature,
+                        response_format={"type": "json_object"},
                     )
                     return response.choices[0].message.content
                 except Exception as e2:
@@ -753,7 +814,7 @@ class AmendmentAnalyzer:
 
         # Stage 1: Three agents analyzing amendments in parallel
         analyzed_batches = []
-        agent_models = [MODEL_ANALYSIS_A, MODEL_ANALYSIS_B, "openai/gpt-oss-20b"]  # Third agent
+        agent_models = [MODEL_ANALYSIS_A, MODEL_ANALYSIS_B, "llama-3.3-70b-versatile"]  # Third agent
         
         for i, batch in enumerate(agent_batches):
             if not batch:
