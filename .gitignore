@@ -43,3 +43,6 @@ next-env.d.ts
 /backend/data/gst-pdfs
 /backend/data/pdfs
 /backend/data/dgft-pdfs
+/backend/data/companies
+/backend/data/logs
+
