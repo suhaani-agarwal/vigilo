@@ -11,3 +11,4 @@ sentence-transformers
 python-dotenv
 groq
 python-multipart
+google-generativeai

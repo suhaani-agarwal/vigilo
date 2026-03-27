@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { TestTube, Bell, Settings, Calendar, FileText, ChevronRight, AlertTriangle, CheckCircle, X, Filter, Search } from 'lucide-react';
+import { TestTube, Bell, Settings, Calendar, FileText, ChevronRight, AlertTriangle, CheckCircle, X, Filter, Search, MessageCircle, Send } from 'lucide-react';
 
 // Expose backend base for client links (safe in client bundle)
 const FRONT_API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5005';
@@ -830,6 +830,295 @@ useEffect(() => {
     </div>
   );
 
+  const ComplianceChatbot = () => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [messages, setMessages] = useState<Array<{role: 'user' | 'assistant', content: string, formatted?: React.ReactNode}>>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Function to format AI responses with rich formatting
+  const formatAIResponse = (text: string): React.ReactNode => {
+    // Split into paragraphs
+    const paragraphs = text.split('\n\n').filter(p => p.trim());
+    
+    return (
+      <div className="space-y-3">
+        {paragraphs.map((paragraph, index) => {
+          // Check if this is a heading
+          if (paragraph.match(/^[A-Z][^:]*:$/) || paragraph.match(/^###/)) {
+            return (
+              <h4 key={index} className="font-semibold text-emerald-300 text-sm">
+                {paragraph.replace('###', '').replace(':', '')}
+              </h4>
+            );
+          }
+          
+          // Check for bullet points
+          if (paragraph.includes('* ') || paragraph.includes('- ')) {
+            const lines = paragraph.split('\n');
+            return (
+              <div key={index} className="space-y-1">
+                {lines.map((line, lineIndex) => {
+                  if (line.startsWith('* ') || line.startsWith('- ')) {
+                    return (
+                      <div key={lineIndex} className="flex items-start">
+                        <span className="text-emerald-400 mr-2 mt-1">•</span>
+                        <span className="text-gray-200 text-sm">{line.substring(2)}</span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <p key={lineIndex} className="text-gray-200 text-sm">{line}</p>
+                  );
+                })}
+              </div>
+            );
+          }
+          
+          // Check for bold text (text between **)
+          if (paragraph.includes('**')) {
+            const parts = paragraph.split('**');
+            return (
+              <p key={index} className="text-gray-200 text-sm">
+                {parts.map((part, partIndex) => 
+                  partIndex % 2 === 1 ? (
+                    <span key={partIndex} className="font-semibold text-white">{part}</span>
+                  ) : (
+                    part
+                  )
+                )}
+              </p>
+            );
+          }
+          
+          // Regular paragraph
+          return (
+            <p key={index} className="text-gray-200 text-sm leading-relaxed">
+              {paragraph}
+            </p>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const sendMessage = async () => {
+    if (!input.trim() || !companyId) return;
+    
+    const userMessage = input.trim();
+    setInput('');
+    setMessages(prev => [...prev, { 
+      role: 'user', 
+      content: userMessage,
+      formatted: <p className="text-white text-sm">{userMessage}</p>
+    }]);
+    setIsLoading(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/chatbot/analyze?company_id=${companyId}&query=${encodeURIComponent(userMessage)}`
+      );
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        setMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: data.response,
+          formatted: formatAIResponse(data.response)
+        }]);
+      } else {
+        setMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: 'Sorry, I encountered an error. Please try again.',
+          formatted: <p className="text-red-300 text-sm">Sorry, I encountered an error. Please try again.</p>
+        }]);
+      }
+    } catch (error) {
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: 'Unable to connect to the compliance analysis service.',
+        formatted: <p className="text-red-300 text-sm">Unable to connect to the compliance analysis service.</p>
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <>
+      {/* Chatbot Toggle Button */}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="fixed bottom-6 right-6 z-50 bg-emerald-600 hover:bg-emerald-700 text-white p-4 rounded-full shadow-lg transition-all duration-300 hover:scale-110 group"
+      >
+        <MessageCircle className="h-6 w-6" />
+        <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full px-2 py-1 scale-0 group-hover:scale-100 transition-transform">
+          AI
+        </span>
+      </button>
+
+      {/* Enhanced Chatbot Panel - Made Much Wider */}
+      {isOpen && (
+        <div 
+          className="fixed bottom-24 right-6 z-50 w-[800px] max-w-[90vw] bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col max-h-[80vh]"
+        >
+          {/* Header with gradient */}
+          <div className="p-6 bg-gradient-to-r from-gray-800 to-gray-900 border-b border-gray-700 rounded-t-2xl">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center space-x-3">
+                <div className="bg-emerald-600 p-2 rounded-lg">
+                  <MessageCircle className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-lg">Compliance Intelligence</h3>
+                  <p className="text-emerald-300 text-xs">Powered by Gemini AI</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsOpen(false)}
+                className="text-gray-400 hover:text-white p-2 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            {/* Quick action buttons */}
+            <div className="flex flex-wrap gap-2 mt-4">
+              {[
+                "Urgent actions?",
+                "Labeling requirements?",
+                "Deadlines?",
+                "Amendments summary"
+              ].map((prompt, index) => (
+                <button
+                  key={index}
+                  onClick={() => setInput(prompt)}
+                  className="bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs px-3 py-1.5 rounded-full transition-colors"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Messages Container with proper background */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gray-900 min-h-[400px]">
+            {messages.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="bg-gray-800 p-4 rounded-2xl mb-4">
+                  <FileText className="h-8 w-8 text-emerald-400 mx-auto mb-3" />
+                  <h4 className="font-semibold text-white mb-2">Compliance Assistant</h4>
+                  <p className="text-gray-300 text-sm">
+                    Ask me about regulations, deadlines, or specific amendments affecting your business
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-left">
+                  <div className="bg-gray-800 p-3 rounded-lg">
+                    <h5 className="font-medium text-emerald-300 text-xs mb-1">📋 Amendments</h5>
+                    <p className="text-gray-400 text-xs">Ask about specific regulatory changes</p>
+                  </div>
+                  <div className="bg-gray-800 p-3 rounded-lg">
+                    <h5 className="font-medium text-red-300 text-xs mb-1">⏰ Deadlines</h5>
+                    <p className="text-gray-400 text-xs">Check compliance timelines</p>
+                  </div>
+                  <div className="bg-gray-800 p-3 rounded-lg">
+                    <h5 className="font-medium text-emerald-300 text-xs mb-1">🏷️ Labeling</h5>
+                    <p className="text-gray-400 text-xs">Packaging requirements</p>
+                  </div>
+                  <div className="bg-gray-800 p-3 rounded-lg">
+                    <h5 className="font-medium text-blue-300 text-xs mb-1">📊 Status</h5>
+                    <p className="text-gray-400 text-xs">Overall compliance status</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              messages.map((message, index) => (
+                <div
+                  key={index}
+                  className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div
+                    className={`max-w-[70%] p-4 rounded-2xl ${
+                      message.role === 'user'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-gray-800 border border-gray-700'
+                    }`}
+                  >
+                    {message.formatted || (
+                      <p className="text-sm">{message.content}</p>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+            
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="bg-gray-800 border border-gray-700 p-4 rounded-2xl max-w-[70%]">
+                  <div className="flex items-center space-x-2">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                      <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                    </div>
+                    <span className="text-emerald-300 text-sm">Analyzing compliance data...</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Enhanced Input Area with solid background */}
+          <div className="p-4 bg-gray-800 border-t border-gray-700 rounded-b-2xl">
+            <div className="flex space-x-3">
+              <div className="flex-1 relative">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                  placeholder="Ask about compliance requirements, deadlines, or amendments..."
+                  className="w-full bg-gray-700 border border-gray-600 text-white text-sm rounded-xl px-4 py-3 pr-10 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 placeholder-gray-400"
+                  disabled={isLoading}
+                />
+                {input && (
+                  <button
+                    onClick={() => setInput('')}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={sendMessage}
+                disabled={isLoading || !input.trim()}
+                className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-600 text-white p-3 rounded-xl transition-colors flex items-center justify-center min-w-[50px]"
+              >
+                {isLoading ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <Send className="h-5 w-5" />
+                )}
+              </button>
+            </div>
+            
+            {/* Quick tips */}
+            <div className="flex items-center justify-between mt-3">
+              <span className="text-gray-400 text-xs">
+                💡 Try: What are the urgent actions needed?
+              </span>
+              <span className="text-emerald-400 text-xs">
+                {companyId ? 'Connected' : 'Company data needed'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
   const NotificationItem = ({ notification }: { notification: {id: string; message: string; type: 'alert' | 'update'} }) => (
     <div className={`p-3 rounded-lg flex items-start justify-between ${
       notification.type === 'alert' ? 'bg-red-500/10 border border-red-500/20' : 'bg-emerald-500/10 border border-emerald-500/20'
@@ -1147,5 +1436,6 @@ useEffect(() => {
         )}
       </div>
     </div>
+    <ComplianceChatbot />
   </div>
 )};

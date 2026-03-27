@@ -23,6 +23,7 @@ from vigilo_utils import (
     save_filtered_amendments,
     get_latest_by_sources
 )
+from chatbot_analyzer import compliance_chatbot
 from typing import List, Dict, Optional, Any
 from fastapi import UploadFile, Form, File, HTTPException
 from datetime import date
@@ -451,6 +452,69 @@ def latest_company():
         raise HTTPException(status_code=404, detail="No companies found")
     info = get_company_info(cid)
     return {"company_id": cid, "company_info": info}
+
+@app.get("/chatbot/analyze")
+async def analyze_compliance_chatbot(company_id: str, query: str):
+    """AI chatbot endpoint for compliance analysis using only stage1 and stage5 files"""
+    try:
+        if not company_id:
+            raise HTTPException(status_code=400, detail="Company ID is required")
+        
+        if not query or len(query.strip()) < 3:
+            raise HTTPException(status_code=400, detail="Query must be at least 3 characters")
+        
+        response = compliance_chatbot.analyze_compliance_query(query.strip(), company_id)
+        return {
+            "status": "success",
+            "response": response,
+            "company_id": company_id
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chatbot analysis failed: {str(e)}")
+
+@app.get("/chatbot/overview")
+async def get_compliance_overview(company_id: str):
+    """Get compliance overview for a company from stage1 and stage5 files"""
+    try:
+        if not company_id:
+            raise HTTPException(status_code=400, detail="Company ID is required")
+        
+        overview = compliance_chatbot.get_compliance_overview(company_id)
+        return {
+            "status": "success",
+            "overview": overview,
+            "company_id": company_id
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get compliance overview: {str(e)}")
+
+@app.get("/chatbot/logs")
+async def get_compliance_logs(company_id: str):
+    """Get available compliance logs for a company"""
+    try:
+        if not company_id:
+            raise HTTPException(status_code=400, detail="Company ID is required")
+        
+        logs_data = compliance_chatbot.get_latest_compliance_logs(company_id)
+        if not logs_data:
+            return {
+                "status": "no_data",
+                "message": "No compliance logs found for this company",
+                "company_id": company_id
+            }
+        
+        return {
+            "status": "success",
+            "timestamp": logs_data["timestamp"].isoformat(),
+            "directory": logs_data["directory"],
+            "log_files": ["stage1_combined_summaries.json", "stage5_final_report.json"],
+            "company_id": company_id
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get compliance logs: {str(e)}")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=5005)
