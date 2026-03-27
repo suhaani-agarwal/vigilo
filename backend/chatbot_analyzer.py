@@ -193,7 +193,7 @@ class ComplianceChatbot:
             USER QUESTION: {query}
 
             Please provide a comprehensive, professional response that:
-            1. Directly addresses the user's question
+            1. Directly addresses the user's question and is breif ,concise and addresses the user
             2. References specific amendments, requirements, or actions from the report
             3. Provides clear explanations and recommendations
             4. Uses bullet points for clarity when appropriate
